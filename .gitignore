@@ -1,0 +1,39 @@
+.DS_Store
+.build/
+.deps/
+target/
+DerivedData/
+build/
+work/
+*.xcuserstate
+*.log
+__pycache__/
+*.pyc
+xcuserdata/
+
+# Real browser data and credential exports don't belong in the project.
+*.csv
+*.tsv
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.keychain
+*.keychain-db
+.env
+.env.*
+BrowserData/
+User Data/
+Login Data*
+Web Data*
+Cookies*
+
+# Local build notes and early design drafts.
+design/
+docs/plan.md
+docs/progress.md
+docs/validation.md
+docs/visual-audit.md
+docs/visual-audit-assets/

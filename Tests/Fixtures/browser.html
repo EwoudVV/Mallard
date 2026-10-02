@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Mallard browser checks</title>
+<style>body{font:16px system-ui;max-width:760px;margin:40px auto;background:#121212;color:#eee}button,input{font:inherit;padding:8px;margin:6px}section{margin:24px 0;padding:16px;border:1px solid #555}.advertisement-banner{background:#922;padding:20px}</style>
+<h1>Mallard browser checks</h1>
+<p>This page uses synthetic data only.</p>
+<section><h2>Profile storage</h2><p id="storage"></p><input id="marker" aria-label="Profile marker" placeholder="personal or school"><button id="save">Save marker</button><button id="clear">Clear marker</button></section>
+<section><h2>Blocking</h2><p id="network">Checking request blocking…</p><div class="advertisement-banner">Synthetic ad element - cosmetic filtering should hide this.</div><p id="cosmetic"></p></section>
+<section><h2>Password form</h2><form><input autocomplete="username" name="username" aria-label="Username"><input type="password" autocomplete="current-password" aria-label="Password"><button type="button" id="inspect">Check synthetic fields</button><p id="filled"></p></form></section>
+<section><h2>Card form</h2><input autocomplete="cc-name" aria-label="Cardholder"><input autocomplete="cc-number" aria-label="Card number"><input autocomplete="cc-exp" aria-label="Expiry"></section>
+<a href="/browser.html?newtab=1" target="_blank">Open a new tab</a>
+<script>
+function display(){document.querySelector('#storage').textContent='Local storage: '+(localStorage.getItem('mallard-profile')||'empty')+' | Cookie: '+(document.cookie||'empty');}
+document.querySelector('#save').onclick=()=>{const v=document.querySelector('#marker').value;localStorage.setItem('mallard-profile',v);document.cookie='mallard_profile='+encodeURIComponent(v)+'; Path=/; SameSite=Lax';display();};
+document.querySelector('#clear').onclick=()=>{localStorage.removeItem('mallard-profile');document.cookie='mallard_profile=; Max-Age=0; Path=/';display();};
+document.querySelector('#inspect').onclick=()=>{document.querySelector('#filled').textContent='Username filled: '+Boolean(document.querySelector('[autocomplete=username]').value)+' | Password filled: '+Boolean(document.querySelector('[type=password]').value);};
+display();
+window.mallardAdScriptLoaded=false;
+const ad=document.createElement('script');ad.src='/adserver.js';
+ad.onerror=()=>{document.querySelector('#network').textContent='Ad request blocked';document.body.dataset.networkBlocked='true';};
+ad.onload=()=>{document.querySelector('#network').textContent='Ad request was allowed';document.body.dataset.networkBlocked='false';};document.head.append(ad);
+setTimeout(()=>{const hidden=getComputedStyle(document.querySelector('.advertisement-banner')).display==='none';document.querySelector('#cosmetic').textContent='Ad element hidden: '+hidden+' | Injected sheets: '+document.adoptedStyleSheets.length+' | Rules: '+document.adoptedStyleSheets.reduce((n,s)=>n+s.cssRules.length,0);document.body.dataset.cosmeticBlocked=String(hidden);},2000);
+</script></html>

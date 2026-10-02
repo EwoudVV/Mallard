@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Mallard network meter check</title>
+<style>body{background:#111;color:#ddd;font:16px monospace;max-width:700px;margin:60px auto}button{padding:12px;font:inherit}p{line-height:1.7}</style>
+<h1>Network meter check</h1>
+<p>This sends generated test bytes to the local fixture server. It does not read or upload any files.</p>
+<button id="start">Send test upload</button><p id="result">Ready</p>
+<script>
+document.querySelector('#start').onclick=async()=>{
+ const button=document.querySelector('#start'),result=document.querySelector('#result');button.disabled=true;
+ let total=0;
+ const chunks=96;
+ try{for(let i=0;i<chunks;i++){
+  const body=new Uint8Array(128*1024);
+  const reply=await fetch('/upload-check',{method:'POST',body});if(!reply.ok)throw new Error('HTTP '+reply.status);
+  const data=await reply.json();total+=data.received;result.textContent='Uploaded '+total+' bytes ('+(i+1)+'/'+chunks+')';
+  await new Promise(resolve=>setTimeout(resolve,500));
+ }result.textContent='Upload complete: '+total+' bytes received by the local server.';}catch(error){result.textContent='Upload failed: '+error.message;}
+ button.disabled=false;
+};
+</script></html>

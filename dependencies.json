@@ -1,0 +1,9 @@
+{
+  "cef": {
+    "version": "154.0.32+g682c378+chromium-154.0.8037.58",
+    "platform": "macosarm64",
+    "archive": "cef_binary_154.0.32+g682c378+chromium-154.0.8037.58_macosarm64_minimal.tar.bz2",
+    "sha1": "2e9df1077c097e450d30f26804b7c4b1820da4e3",
+    "source": "https://cef-builds.spotifycdn.com/"
+  }
+}
