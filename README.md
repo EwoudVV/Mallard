@@ -36,7 +36,9 @@ open build/Mallard.app
 
 quit Mallard before rebuilding. the script downloads the pinned CEF build, checks its checksum, and signs the app locally. it doesn't install anything in Applications or change your default browser.
 
-signing setup is only needed once. the private key stays in your Mac's Keychain, and later builds reuse it so app permissions survive rebuilds. local signing settings stay in the ignored `.local` folder. when switching from an older build, macOS may ask once more about Chromium Safe Storage; choose Always Allow for Mallard to remember it.
+signing setup is only needed once. the private key stays in your Mac's Keychain and later builds reuse it. local signing settings stay in the ignored `.local` folder.
+
+the first build asks for your password so codesign can use the key. pick Always Allow and it stops asking. the build is self-signed, so it has no team ID, and macOS still asks about Chromium Safe Storage the first time each new build opens. Always Allow covers that build until the next rebuild.
 
 ## still working on
 

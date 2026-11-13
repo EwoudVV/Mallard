@@ -1,36 +1,39 @@
 #!/usr/bin/env python3
-"""Check that a changed binary keeps access to its own test Keychain item."""
-from pathlib import Path
+"""Check Mallard's signing setup without using any Keychain item, so it never asks for a password."""
 import re
 import subprocess
-import tempfile
-import uuid
+import sys
 from development_signing import ROOT, load_identity
 
 signing = load_identity()
-service = 'com.ewoudvv.Mallard.signing-test.' + str(uuid.uuid4())
-(ROOT / 'build').mkdir(exist_ok=True)
-with tempfile.TemporaryDirectory(prefix='signing-check-', dir=ROOT / 'build') as temporary:
-    binary = Path(temporary) / 'MallardSigningProbe'
-    requirements, hashes = [], []
-    created = False
-    try:
-        for revision in (1, 2):
-            compiled = Path(temporary) / f'build-{revision}'
-            subprocess.run(['clang', '-fobjc-arc', '-Wno-deprecated-declarations', '-framework', 'Foundation', '-framework', 'Security', f'-DPROBE_REVISION={revision}', str(ROOT / 'Tests/SigningProbe.m'), '-o', str(compiled)], check=True)
-            subprocess.run(['codesign', '--force', '--sign', signing['identity'], '--keychain', signing['keychain'], '--timestamp=none', '--identifier', 'com.ewoudvv.Mallard.signing-check', str(compiled)], check=True)
-            compiled.replace(binary)
-            result = subprocess.run(['codesign', '-d', '-r-', '--verbose=4', str(binary)], capture_output=True, text=True, check=True)
-            description = result.stdout + result.stderr
-            requirements.append(re.search(r'^designated => .+$', description, re.M).group())
-            hashes.append(re.search(r'^CDHash=(.+)$', description, re.M).group(1))
-            if revision == 1:
-                subprocess.run([str(binary), 'create', service], check=True)
-                created = True
-            subprocess.run([str(binary), 'read', service], check=True)
-        if requirements[0] != requirements[1] or hashes[0] == hashes[1]:
-            raise SystemExit('The two builds did not have different hashes and the same signing requirement.')
-        print('Changed builds kept the same identity and read their test item without a password prompt.')
-    finally:
-        if created:
-            subprocess.run([str(binary), 'delete', service], check=True)
+app = ROOT / 'build/Mallard.app'
+problems = []
+
+# The built app should carry the saved identity, not an ad-hoc signature.
+result = subprocess.run(['codesign', '-d', '-r-', str(app)], capture_output=True, text=True)
+requirement = re.search(r'^designated => (.+)$', result.stdout + result.stderr, re.M)
+if not requirement:
+    problems.append('build/Mallard.app is missing or unsigned. Build it first: python3 scripts/build.py')
+elif f'certificate leaf = h"{signing["identity"].lower()}"' not in requirement.group(1).lower():
+    problems.append('build/Mallard.app is not signed with the saved Mallard Development identity.')
+
+# codesign runs in the apple: partition. Without it on the key, every signature asks for the login password.
+dump = subprocess.run(['security', 'dump-keychain', '-a', signing['keychain']], capture_output=True, text=True).stdout
+partitions = None
+for block in dump.split('keychain: ')[1:]:
+    if 'class: 0x00000010' in block and '="Mallard Development"' in block:
+        found = re.search(r'partition_id\s+(?:don\'t-require-password\s+)?description: ([^\n]+)', block)
+        partitions = [item.strip() for item in found.group(1).split(',')] if found else []
+if partitions is None:
+    problems.append('The Mallard Development private key was not found in Keychain.')
+
+for problem in problems:
+    print(problem)
+if problems:
+    sys.exit(1)
+print('build/Mallard.app is signed with the saved identity.')
+if 'apple:' in partitions:
+    print('codesign can use the key without asking.')
+else:
+    print('codesign will ask for your login password on each signature until you pick Always Allow on one of those prompts.')
+print('self-signed builds have no team ID, so macOS asks about Chromium Safe Storage once after each rebuild. Always Allow covers that build.')

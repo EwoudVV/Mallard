@@ -17,7 +17,7 @@ these cover URL handling, the password CSV parser, bookmark imports, favicon han
 python3 scripts/check_signing.py
 ```
 
-this builds two different test programs with the same signing identity. the second must read the first's disposable Keychain item without an authentication prompt. it doesn't read saved browser data.
+this checks that the built app uses the saved signing identity and whether codesign can use the key without asking. it only reads signatures and access settings, so it never asks for a password and doesn't touch saved browser data.
 
 ## browser checks
 
