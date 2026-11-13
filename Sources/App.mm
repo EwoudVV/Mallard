@@ -83,7 +83,10 @@ struct Tab {
     MallardFavicons *favicons;
     NSTimeInterval lastCounterSave;
     MallardInput *addressInput,*homeInput;
-    MallardButton *personalButton,*schoolButton,*vaultButton,*shieldButton,*backButton,*forwardButton,*reloadButton,*newTabButton,*updateButton;
+    MallardButton *personalButton,*schoolButton,*vaultButton,*shieldButton,*backButton,*forwardButton,*reloadButton,*newTabButton,*updateButton,*sidebarButton;
+    NSTextField *tabsLabel;
+    BOOL sidebarHidden;
+    CGFloat titlebarHeight;
     NSProgressIndicator *loading;
     NSString *profile;
     NSMutableDictionary *state;
@@ -181,7 +184,7 @@ public:
         if(event.type!=KEYEVENT_RAWKEYDOWN && event.type!=KEYEVENT_KEYDOWN) return false;
         NSString *action=nil; bool command=event.modifiers&EVENTFLAG_COMMAND_DOWN,shift=event.modifiers&EVENTFLAG_SHIFT_DOWN;
         if(command) switch(event.windows_key_code) {
-            case 'T':action=shift?@"reopen:":@"newTab:";break;case 'W':action=@"closeTab:";break;case 'L':action=@"focusAddress:";break;case 'K':action=@"palette:";break;case 'R':action=@"reload:";break;case 'F':action=(event.modifiers&EVENTFLAG_CONTROL_DOWN)?@"fullscreen:":@"find:";break;case 'D':action=@"bookmark:";break;case 'J':action=@"showDownloads:";break;case 'Y':action=@"showHistory:";break;case 'Q':action=@"quit:";break;
+            case 'T':action=shift?@"reopen:":@"newTab:";break;case 'W':action=@"closeTab:";break;case 'L':action=@"focusAddress:";break;case 'K':action=@"palette:";break;case 'R':action=@"reload:";break;case 'F':action=(event.modifiers&EVENTFLAG_CONTROL_DOWN)?@"fullscreen:":@"find:";break;case 'S':if(event.modifiers&EVENTFLAG_CONTROL_DOWN)action=@"toggleSidebar:";break;case 'D':action=@"bookmark:";break;case 'J':action=@"showDownloads:";break;case 'Y':action=@"showHistory:";break;case 'Q':action=@"quit:";break;
         }
         if((event.modifiers&EVENTFLAG_CONTROL_DOWN) && (event.modifiers&EVENTFLAG_ALT_DOWN)) {
             if(event.windows_key_code=='1')action=@"personal:";if(event.windows_key_code=='2')action=@"school:";
@@ -295,6 +298,44 @@ static MallardButton *Icon(NSString *symbol,NSString *label,id target,SEL action
     MallardButton *b=Button(@"",target,action); SetIcon(b,symbol,label); return b;
 }
 static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; view.layer.backgroundColor=color.CGColor; }
+// Labels draw their text 2 points inside their frame. Offsetting by this lines text up with boxes, lines, and icons.
+static const CGFloat LabelInset=2;
+// Toolbar icon buttons share one size and pitch on both sides of the address bar.
+static const CGFloat IconSize=28,IconPitch=30,ToolbarMargin=10;
+static NSWindow *MallardMakeWindow(void) {
+    NSWindow *window=[[NSWindow alloc] initWithContentRect:NSMakeRect(100,100,1160,760) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable|NSWindowStyleMaskFullSizeContentView backing:NSBackingStoreBuffered defer:NO];
+    window.title=@"Mallard"; window.titleVisibility=NSWindowTitleHidden; window.titlebarAppearsTransparent=YES; window.titlebarSeparatorStyle=NSTitlebarSeparatorStyleNone; window.backgroundColor=Color(.06); window.minSize=NSMakeSize(740,480); window.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    // An empty toolbar makes the title bar as tall as Mallard's toolbar row, so the window buttons sit centered in it.
+    window.toolbar=[[NSToolbar alloc] initWithIdentifier:@"MallardWindow"]; window.toolbarStyle=NSWindowToolbarStyleUnifiedCompact;
+    window.autorecalculatesKeyViewLoop=YES; window.releasedWhenClosed=NO;
+    return window;
+}
+// Controls in the title bar row only work if clicks reach them instead of the title bar. Ask the window which view a click would hit.
+static BOOL MallardWindowTests(void) {
+    [NSApplication sharedApplication];
+    NSWindow *window=MallardMakeWindow();NSView *root=window.contentView,*frameView=root.superview;[frameView layoutSubtreeIfNeeded];
+    CGFloat h=NSHeight(root.bounds),top=round(h-NSHeight(window.contentLayoutRect)),rowCenter=h-top/2;
+    NSTextField *field=[NSTextField textFieldWithString:@""];field.frame=NSMakeRect(320,rowCenter-14,500,28);[root addSubview:field];
+    NSButton *button=[NSButton buttonWithTitle:@"" target:nil action:nil];button.bordered=NO;button.frame=NSMakeRect(220,rowCenter-14,28,28);[root addSubview:button];
+    [frameView layoutSubtreeIfNeeded];
+    auto hits=^BOOL(NSView *view){NSView *hit=[frameView hitTest:[root convertPoint:NSMakePoint(NSMidX(view.frame),NSMidY(view.frame)) toView:nil]];return hit==view || [hit isDescendantOf:view];};
+    NSButton *zoom=[window standardWindowButton:NSWindowZoomButton];
+    CGFloat lights=NSMidY([zoom convertRect:zoom.bounds toView:nil]);
+    NSView *empty=[frameView hitTest:[root convertPoint:NSMakePoint(1000,rowCenter) toView:nil]];
+    BOOL ok=hits(field) && hits(button) && fabs(lights-rowCenter)<=1 && top>=28 && empty.mouseDownCanMoveWindow;
+    fprintf(stderr,"Window checks: %s (title bar %.0f pt, window buttons %+.1f pt from row center, address %s, button %s, empty space %s)\n",ok?"passed":"failed",top,lights-rowCenter,hits(field)?"clickable":"blocked",hits(button)?"clickable":"blocked",empty.mouseDownCanMoveWindow?"drags window":"does not drag");
+    [window close];return ok;
+}
+static NSImage *PlusSymbol(void) {
+    static NSImage *image;static dispatch_once_t once;
+    dispatch_once(&once,^{
+        NSImageSymbolConfiguration *style=[[NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightRegular] configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[Color(.85)]]];
+        NSImage *symbol=[[NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:nil] imageWithSymbolConfiguration:style];
+        // Same 16 point slot as tab favicons, so "new tab" lines up with the tab titles above it.
+        image=[NSImage imageWithSize:NSMakeSize(16,16) flipped:NO drawingHandler:^BOOL(NSRect rect){NSSize size=symbol.size;[symbol drawInRect:NSMakeRect(round((16-size.width)/2),round((16-size.height)/2),size.width,size.height)];return YES;}];
+    });
+    return image;
+}
 
 @implementation MallardController
 - (void)start {
@@ -320,23 +361,21 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
         auto ctx=CefRequestContext::CreateContext(settings,nullptr);
         if([name isEqual:@"personal"]) personalContext=ctx; else schoolContext=ctx;
     }
-    window=[[NSWindow alloc] initWithContentRect:NSMakeRect(100,100,1160,760) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-    window.delegate=self; window.title=@"Mallard"; window.titlebarAppearsTransparent=YES; window.backgroundColor=Color(.06); window.minSize=NSMakeSize(740,480); window.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
-    window.autorecalculatesKeyViewLoop=YES;
+    window=MallardMakeWindow(); window.delegate=self; sidebarHidden=[state[@"sidebarHidden"] boolValue];
     root=[[MallardView alloc] initWithFrame:window.contentView.bounds]; root.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable; window.contentView=root; FillBackground(root,Color(.02));
     sidebar=[MallardView new]; FillBackground(sidebar,Color(.045)); [root addSubview:sidebar];
     personalButton=Button(@"Personal",self,@selector(changeProfile:)); personalButton.tag=0; [sidebar addSubview:personalButton];
     schoolButton=Button(@"School",self,@selector(changeProfile:)); schoolButton.tag=1; [sidebar addSubview:schoolButton];
-    NSTextField *tabsLabel=Label(@"tabs",11,Color(.5)); tabsLabel.frame=NSMakeRect(20,74,140,18); [sidebar addSubview:tabsLabel];
+    tabsLabel=Label(@"tabs",11,Color(.5)); [sidebar addSubview:tabsLabel];
     tabsScroll=[NSScrollView new];tabsScroll.hasVerticalScroller=YES;tabsScroll.autohidesScrollers=YES;tabsScroll.drawsBackground=YES;tabsScroll.backgroundColor=Color(.045);tabsScroll.borderType=NSNoBorder;
     tabsDocument=[MallardView new];tabsDocument.autoresizingMask=NSViewWidthSizable;tabsScroll.documentView=tabsDocument;[sidebar addSubview:tabsScroll];
-    newTabButton=Button(@"+ new tab",self,@selector(newTab:));newTabButton.leftAligned=YES;[tabsDocument addSubview:newTabButton];
+    newTabButton=Button(@"new tab",self,@selector(newTab:));newTabButton.leftAligned=YES;newTabButton.leadingImage=PlusSymbol();[newTabButton setAccessibilityLabel:@"New tab"];[tabsDocument addSubview:newTabButton];
     bookmarkView=[MallardBookmarkView new];bookmarkView.favicons=favicons;__weak MallardController *weakSelf=self;
     bookmarkView.openURL=^(NSString *url){MallardController *owner=weakSelf;if(owner)[owner newTabURL:url profile:owner->profile];};bookmarkView.changed=^{[weakSelf saveSession];};bookmarkView.importRequested=^{[weakSelf importBookmarks:nil];};[sidebar addSubview:bookmarkView];
     toolbar=[MallardView new]; FillBackground(toolbar,Color(.065)); [root addSubview:toolbar];
     backButton=Icon(@"chevron.left",@"Back",self,@selector(goBack:));forwardButton=Icon(@"chevron.right",@"Forward",self,@selector(goForward:));reloadButton=Icon(@"arrow.clockwise",@"Reload",self,@selector(stopOrReload:));
-    NSInteger navigationIndex=0;for(NSButton *b in @[backButton,forwardButton,reloadButton]) { b.frame=NSMakeRect(8+navigationIndex++*29,12,28,28); [toolbar addSubview:b]; }
-    addressInput=[[MallardInput alloc] initWithFontSize:12 secure:NO]; addressInput.trailingInset=24;addressInput.selectsAllOnFirstClick=YES;address=addressInput.field;
+    for(NSButton *b in @[backButton,forwardButton,reloadButton]) [toolbar addSubview:b];
+    addressInput=[[MallardInput alloc] initWithFontSize:12 secure:NO]; addressInput.selectsAllOnFirstClick=YES;address=addressInput.field;
     address.placeholderAttributedString=[[NSAttributedString alloc] initWithString:@"Search or enter address" attributes:@{NSFontAttributeName:Mono(12),NSForegroundColorAttributeName:Color(.55)}]; address.target=self; address.action=@selector(addressEntered:); address.delegate=self; [address setAccessibilityLabel:@"Address"]; [toolbar addSubview:addressInput];
     vaultButton=Icon(@"key.horizontal",@"Passwords and cards",self,@selector(showVault:)); [toolbar addSubview:vaultButton];
     shieldButton=Icon(@"shield",@"Ad blocking",self,@selector(showProtection:)); [toolbar addSubview:shieldButton];
@@ -352,6 +391,7 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
     noticeLabel=Label(@"",11,Color(.65));[root addSubview:noticeLabel];
     resourceText=Label(@"Reading app usage...",10,Color(.60));resourceText.alignment=NSTextAlignmentRight;[resourceText setAccessibilityLabel:@"Mallard resource usage"];[root addSubview:resourceText];
     updateButton=Button(@"Update ready",self,@selector(showFilterUpdate:));updateButton.font=Mono(10);updateButton.hidden=YES;[root addSubview:updateButton];
+    sidebarButton=Icon(@"sidebar.left",@"Hide sidebar",self,@selector(toggleSidebar:));[root addSubview:sidebarButton];[self updateSidebarButton];
     [self buildMenu];
     NSArray *storedTabs=[state[@"tabs"] isKindOfClass:NSArray.class]?state[@"tabs"]:@[];
     for(NSDictionary *entry in storedTabs) {
@@ -379,31 +419,70 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
     NSMenu *app=addMenu(@"Mallard"); add(app,@"About Mallard",@selector(about:),@"",0); add(app,@"Settings…",@selector(settings:),@",",NSEventModifierFlagCommand); [app addItem:NSMenuItem.separatorItem]; add(app,@"Quit Mallard",@selector(quit:),@"q",NSEventModifierFlagCommand);
     NSMenu *file=addMenu(@"File"); add(file,@"New Tab",@selector(newTab:),@"t",NSEventModifierFlagCommand); add(file,@"Close Tab",@selector(closeTab:),@"w",NSEventModifierFlagCommand); add(file,@"Reopen Closed Tab",@selector(reopen:),@"t",NSEventModifierFlagCommand|NSEventModifierFlagShift); [file addItem:NSMenuItem.separatorItem]; add(file,@"Import Chrome Passwords…",@selector(importPasswords:),@"i",NSEventModifierFlagCommand|NSEventModifierFlagShift);
     NSMenu *edit=addMenu(@"Edit"); for(NSArray *entry in @[@[@"Undo",@"undo:",@"z"],@[@"Cut",@"cut:",@"x"],@[@"Copy",@"copy:",@"c"],@[@"Paste",@"paste:",@"v"],@[@"Select All",@"selectAll:",@"a"]]) { NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[0] action:NSSelectorFromString(entry[1]) keyEquivalent:entry[2]]; [edit addItem:item]; }
-    NSMenu *view=addMenu(@"View"); add(view,@"Focus Address",@selector(focusAddress:),@"l",NSEventModifierFlagCommand); add(view,@"Find Tab or Search…",@selector(palette:),@"k",NSEventModifierFlagCommand); add(view,@"Find in Page…",@selector(find:),@"f",NSEventModifierFlagCommand); add(view,@"Reload",@selector(reload:),@"r",NSEventModifierFlagCommand); add(view,@"Zoom In",@selector(zoomIn:),@"+",NSEventModifierFlagCommand); add(view,@"Zoom Out",@selector(zoomOut:),@"-",NSEventModifierFlagCommand); add(view,@"Actual Size",@selector(zoomReset:),@"0",NSEventModifierFlagCommand); add(view,@"Toggle Full Screen",@selector(fullscreen:),@"f",NSEventModifierFlagCommand|NSEventModifierFlagControl);
+    NSMenu *view=addMenu(@"View"); add(view,@"Focus Address",@selector(focusAddress:),@"l",NSEventModifierFlagCommand); add(view,@"Find Tab or Search…",@selector(palette:),@"k",NSEventModifierFlagCommand); add(view,@"Find in Page…",@selector(find:),@"f",NSEventModifierFlagCommand); add(view,@"Reload",@selector(reload:),@"r",NSEventModifierFlagCommand); add(view,@"Zoom In",@selector(zoomIn:),@"+",NSEventModifierFlagCommand); add(view,@"Zoom Out",@selector(zoomOut:),@"-",NSEventModifierFlagCommand); add(view,@"Actual Size",@selector(zoomReset:),@"0",NSEventModifierFlagCommand); add(view,@"Toggle Sidebar",@selector(toggleSidebar:),@"s",NSEventModifierFlagCommand|NSEventModifierFlagControl); add(view,@"Toggle Full Screen",@selector(fullscreen:),@"f",NSEventModifierFlagCommand|NSEventModifierFlagControl);
     NSMenu *history=addMenu(@"History"); add(history,@"Show History",@selector(showHistory:),@"y",NSEventModifierFlagCommand); add(history,@"Downloads",@selector(showDownloads:),@"j",NSEventModifierFlagCommand);
     NSMenu *bookmarks=addMenu(@"Bookmarks"); add(bookmarks,@"Bookmark This Page",@selector(bookmark:),@"d",NSEventModifierFlagCommand); add(bookmarks,@"Show Bookmarks",@selector(showBookmarks:),@"",0);add(bookmarks,@"New Folder...",@selector(newBookmarkFolder:),@"",0);add(bookmarks,@"Import Chrome Bookmarks...",@selector(importBookmarks:),@"",0);
     NSMenu *profiles=addMenu(@"Profiles"); add(profiles,@"Personal",@selector(personal:),@"1",NSEventModifierFlagControl|NSEventModifierFlagOption); add(profiles,@"School",@selector(school:),@"2",NSEventModifierFlagControl|NSEventModifierFlagOption);
     NSMenu *developer=addMenu(@"Developer");add(developer,@"Test Synthetic Password Fill",@selector(testPasswordFill:),@"",0);add(developer,@"Test Synthetic Card Fill",@selector(testCardFill:),@"",0);
     NSApp.mainMenu=bar;
 }
+- (BOOL)isFullScreen { return (window.styleMask&NSWindowStyleMaskFullScreen)!=0; }
+- (CGFloat)topHeight {
+    // The toolbar row is the title bar. Measure it so the window buttons and Mallard's controls share a center line.
+    if(![self isFullScreen]) { CGFloat measured=round(NSHeight(window.contentView.bounds)-NSHeight(window.contentLayoutRect)); if(measured>=28 && measured<=80) titlebarHeight=measured; }
+    return titlebarHeight?:40;
+}
+- (CGFloat)windowButtonsEnd {
+    NSButton *zoom=[window standardWindowButton:NSWindowZoomButton];
+    if([self isFullScreen] || !zoom || zoom.window!=window) return 0;
+    return NSMaxX([root convertRect:zoom.bounds fromView:zoom]);
+}
+- (void)updateSidebarButton {
+    NSString *label=sidebarHidden?@"Show sidebar":@"Hide sidebar";
+    SetIcon(sidebarButton,@"sidebar.left",label);
+}
+- (void)toggleSidebar:(id)sender {
+    sidebarHidden=!sidebarHidden; state[@"sidebarHidden"]=@(sidebarHidden);
+    NSResponder *focus=window.firstResponder;
+    if(sidebarHidden && [focus isKindOfClass:NSView.class] && [(NSView *)focus isDescendantOf:sidebar]) [window makeFirstResponder:nil];
+    [self updateSidebarButton]; [self layout]; [self saveSession];
+}
+- (void)revealSidebar { if(sidebarHidden) [self toggleSidebar:nil]; }
+- (void)windowDidEnterFullScreen:(NSNotification *)notification { [self layout]; }
+- (void)windowDidExitFullScreen:(NSNotification *)notification { [self layout]; }
 - (void)layout {
-    CGFloat w=root.bounds.size.width,h=root.bounds.size.height,s=210,top=53,bottom=w<1100?46:25;
-    sidebar.frame=NSMakeRect(0,0,s,h-bottom); toolbar.frame=NSMakeRect(s,0,w-s,top); webArea.frame=NSMakeRect(s,top,w-s,h-top-bottom); status.frame=NSMakeRect(15,h-bottom+4,310,18);
-    CGFloat metricsWidth=MIN(w-30,MAX(600,[resourceText.stringValue sizeWithAttributes:@{NSFontAttributeName:resourceText.font}].width+8));
-    resourceText.frame=NSMakeRect(w-metricsWidth-15,h-21,metricsWidth,18);
-    CGFloat noticeEnd=bottom>25?w-130:w-metricsWidth-25;
-    updateButton.frame=NSMakeRect(w-120,h-bottom+2,108,21);updateButton.hidden=!filterUpdateReady || bottom==25;
-    noticeLabel.frame=NSMakeRect(327,h-bottom+4,MAX(0,noticeEnd-327),18);
-    personalButton.frame=NSMakeRect(12,16,90,30); schoolButton.frame=NSMakeRect(108,16,90,30);
-    CGFloat bookmarkHeight=MIN(260,MAX(130,(h-bottom-96)*.40));
-    tabsScroll.frame=NSMakeRect(0,96,s,MAX(100,h-bottom-96-bookmarkHeight));
-    bookmarkView.frame=NSMakeRect(0,NSMaxY(tabsScroll.frame),s,bookmarkHeight);
+    CGFloat w=root.bounds.size.width,h=root.bounds.size.height,full=210,s=sidebarHidden?0:full,top=[self topHeight],bottom=w<1100?46:25,controlY=round((top-IconSize)/2);
+    sidebar.hidden=sidebarHidden;
+    sidebar.frame=NSMakeRect(0,0,full,h-bottom); toolbar.frame=NSMakeRect(s,0,w-s,top); webArea.frame=NSMakeRect(s,top,w-s,h-top-bottom);
+    CGFloat buttonsEnd=[self windowButtonsEnd];
+    sidebarButton.frame=NSMakeRect(buttonsEnd?buttonsEnd+12:ToolbarMargin,controlY,IconSize,IconSize);
+    // Footer text lines up with the sidebar's text column on the left and mirrors it on the right.
+    CGFloat footerText=22,footerY=h-21;
+    status.frame=NSMakeRect(footerText-LabelInset,h-bottom+4,310,18);
+    CGFloat metricsWidth=MIN(w-2*footerText,MAX(600,[resourceText.stringValue sizeWithAttributes:@{NSFontAttributeName:resourceText.font}].width+8));
+    resourceText.frame=NSMakeRect(w-footerText+LabelInset-metricsWidth,footerY,metricsWidth,18);
+    updateButton.frame=NSMakeRect(w-footerText+LabelInset-108,h-bottom+2,108,21);updateButton.hidden=!filterUpdateReady || bottom==25;
+    CGFloat noticeStart=NSMaxX(status.frame)+2,noticeEnd=bottom>25?NSMinX(updateButton.frame)-10:NSMinX(resourceText.frame)-10;
+    noticeLabel.frame=NSMakeRect(noticeStart,h-bottom+4,MAX(0,noticeEnd-noticeStart),18);
+    // Sidebar: profile switch under the window buttons, then tabs, then bookmarks. Rows and boxes start at 12, text at 22.
+    CGFloat profileY=top+6,listTop=profileY+80;
+    personalButton.frame=NSMakeRect(12,profileY,90,30); schoolButton.frame=NSMakeRect(108,profileY,90,30);
+    tabsLabel.frame=NSMakeRect(22-LabelInset,profileY+58,140,18);
+    CGFloat bookmarkHeight=MIN(260,MAX(130,(h-bottom-listTop)*.40));
+    tabsScroll.frame=NSMakeRect(0,listTop,full,MAX(100,h-bottom-listTop-bookmarkHeight));
+    bookmarkView.frame=NSMakeRect(0,NSMaxY(tabsScroll.frame),full,bookmarkHeight);
     [self layoutTabs];
-    CGFloat tw=toolbar.bounds.size.width;
-    addressInput.frame=NSMakeRect(102,12,tw-227,28); vaultButton.frame=NSMakeRect(tw-117,12,30,28); shieldButton.frame=NSMakeRect(tw-80,12,30,28); [toolbar viewWithTag:44].frame=NSMakeRect(tw-43,12,30,28); loading.frame=NSMakeRect(NSMaxX(addressInput.frame)-25,18,16,16);
+    // Toolbar: when the sidebar is hidden, navigation continues right after the sidebar button.
+    CGFloat tw=toolbar.bounds.size.width,lead=sidebarHidden?NSMaxX(sidebarButton.frame)+IconPitch-IconSize:ToolbarMargin;
+    NSInteger index=0;for(NSView *b in @[backButton,forwardButton,reloadButton]) b.frame=NSMakeRect(lead+index++*IconPitch,controlY,IconSize,IconSize);
+    index=0;for(NSView *b in @[[toolbar viewWithTag:44],shieldButton,vaultButton]) b.frame=NSMakeRect(tw-ToolbarMargin-IconSize-index++*IconPitch,controlY,IconSize,IconSize);
+    CGFloat addressLeft=NSMaxX(reloadButton.frame)+8;
+    addressInput.frame=NSMakeRect(addressLeft,controlY,MAX(0,NSMinX(vaultButton.frame)-8-addressLeft),IconSize);
+    loading.frame=NSMakeRect(NSMaxX(addressInput.frame)-27,controlY+6,16,16);
     home.frame=webArea.bounds;
-    CGFloat width=MIN(470,webArea.bounds.size.width-65),left=(webArea.bounds.size.width-width)/2,y=MAX(70,(webArea.bounds.size.height-150)/2);
-    homeLabel.frame=NSMakeRect(left,y-40,width,18);homeInput.frame=NSMakeRect(left,y,width,44);[home viewWithTag:3].frame=NSMakeRect(left,y+67,width,24);
+    // New tab page: label, prompt, underline, and shortcuts all start on the same column.
+    CGFloat width=MIN(470,webArea.bounds.size.width-65),left=round((webArea.bounds.size.width-width)/2),y=round(MAX(70,(webArea.bounds.size.height-150)/2));
+    homeLabel.frame=NSMakeRect(left-LabelInset,y-28,width,18);homeInput.frame=NSMakeRect(left,y,width,32);[home viewWithTag:3].frame=NSMakeRect(left-LabelInset,y+46,width,18);
     for(auto &tab:tabs) tab->host.frame=webArea.bounds;
 }
 - (void)layoutTabs {
@@ -420,7 +499,8 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
         if(![tab->profile isEqual:profile] || tab->closing)continue;
         row.frame=NSMakeRect(12,index++*38,rowWidth,34);
     }
-    newTabButton.frame=NSMakeRect(12,index*38+8,rowWidth,30);
+    // Same height and pitch as a tab row, so it reads as the next row.
+    newTabButton.frame=NSMakeRect(12,index*38,rowWidth,34);
     origin.y=MIN(MAX(0,origin.y),MAX(0,height-tabsScroll.contentSize.height));origin.x=0;
     [tabsScroll.contentView scrollToPoint:origin];[tabsScroll reflectScrolledClipView:tabsScroll.contentView];
 }
@@ -468,6 +548,8 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
     SetIcon(reloadButton,busy?@"xmark":@"arrow.clockwise",busy?@"Stop loading":@"Reload");
     for(NSButton *button in @[backButton,forwardButton,reloadButton]){button.contentTintColor=Color(button.enabled?.82:.28);button.needsDisplay=YES;}
     if(busy)[loading startAnimation:nil];else[loading stopAnimation:nil];
+    // Leave room for the spinner only while it shows, so long addresses use the full bar the rest of the time.
+    CGFloat spinnerRoom=busy?30:0;if(addressInput.trailingInset!=spinnerRoom)addressInput.trailingInset=spinnerRoom;
     BOOL paused=current && !current->blocking;
     NSString *symbol=!BlockingReady?@"exclamationmark.shield":paused?@"shield.slash":@"shield";
     NSString *label=!BlockingReady?@"Ad blocking unavailable":paused?@"Ad blocking paused for this tab":@"Ad blocking on";
@@ -588,11 +670,12 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
     NSMenu *menu=[[NSMenu alloc] initWithTitle:title];
     for(NSDictionary *entry in [list reverseObjectEnumerator]) { NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[@"title"]?:entry[@"url"] action:@selector(openSaved:) keyEquivalent:@""]; item.target=self; item.representedObject=entry[@"url"]; [menu addItem:item]; if(menu.numberOfItems>=40) break; }
     if(!menu.numberOfItems) [menu addItemWithTitle:@"Nothing saved yet" action:nil keyEquivalent:@""];
-    [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(12,92) inView:sidebar];
+    [self popUp:menu under:[toolbar viewWithTag:44]];
 }
-- (void)showBookmarks:(id)sender { [bookmarkView focusBookmarks]; }
-- (void)newBookmarkFolder:(id)sender { [bookmarkView newFolder:sender]; }
+- (void)showBookmarks:(id)sender { [self revealSidebar]; [bookmarkView focusBookmarks]; }
+- (void)newBookmarkFolder:(id)sender { [self revealSidebar]; [bookmarkView newFolder:sender]; }
 - (void)importBookmarks:(id)sender {
+    [self revealSidebar];
     NSString *rootPath=[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Google/Chrome"];
     NSData *data=[NSData dataWithContentsOfFile:[rootPath stringByAppendingPathComponent:@"Local State"]];NSDictionary *local=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:nil]:nil;NSDictionary *profiles=local[@"profile"][@"info_cache"];
     NSMenu *menu=[[NSMenu alloc] initWithTitle:@"Import Chrome bookmarks"];
@@ -611,10 +694,15 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
     state[profile][@"bookmarks"]=MallardBookmarkTree(state[profile][@"bookmarks"]);[favicons primeBookmarks:state[profile][@"bookmarks"] profile:profile];[self saveSession];[self refresh];
     [self alert:@"Bookmarks imported" detail:[NSString stringWithFormat:@"%@ bookmarks added to %@. Existing bookmarks were kept; %@ repeated or unsupported entries were skipped.",result[@"imported"],profile.capitalizedString,result[@"skipped"]]];
 }
+- (void)popUp:(NSMenu *)menu under:(NSView *)anchor {
+    // Right-align with the button when it sits at the right edge, so the menu stays in the window.
+    NSRect frame=anchor.frame;CGFloat x=NSMidX(frame)>NSMidX(anchor.superview.bounds)?NSMaxX(frame)-menu.size.width:NSMinX(frame);
+    [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(x,NSMaxY(frame)+4) inView:anchor.superview];
+}
 - (void)showHistory:(id)sender { [self showList:state[profile][@"history"] title:@"History"]; }
 - (void)revealDownload:(NSMenuItem *)sender { [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[[NSURL fileURLWithPath:sender.representedObject]]]; }
-- (void)showDownloads:(id)sender { NSMenu *menu=[NSMenu new]; for(NSDictionary *entry in [state[profile][@"downloads"] reverseObjectEnumerator]) { NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[@"name"] action:@selector(revealDownload:) keyEquivalent:@""]; item.target=self; item.representedObject=entry[@"path"]; [menu addItem:item]; } if(!menu.numberOfItems) [menu addItemWithTitle:@"No completed downloads" action:nil keyEquivalent:@""]; [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(12,92) inView:sidebar]; }
-- (void)showMore:(id)sender { NSMenu *menu=[NSMenu new]; for(NSArray *row in @[@[@"Bookmarks",@"showBookmarks:"],@[@"History",@"showHistory:"],@[@"Downloads",@"showDownloads:"],@[@"Find in Page…",@"find:"],@[@"Mute / Unmute Tab",@"mute:"],@[@"Developer Tools",@"devtools:"]]) { NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:row[0] action:NSSelectorFromString(row[1]) keyEquivalent:@""]; item.target=self; [menu addItem:item]; } [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(toolbar.bounds.size.width-30,46) inView:toolbar]; }
+- (void)showDownloads:(id)sender { NSMenu *menu=[NSMenu new]; for(NSDictionary *entry in [state[profile][@"downloads"] reverseObjectEnumerator]) { NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:entry[@"name"] action:@selector(revealDownload:) keyEquivalent:@""]; item.target=self; item.representedObject=entry[@"path"]; [menu addItem:item]; } if(!menu.numberOfItems) [menu addItemWithTitle:@"No completed downloads" action:nil keyEquivalent:@""]; [self popUp:menu under:[toolbar viewWithTag:44]]; }
+- (void)showMore:(id)sender { NSMenu *menu=[NSMenu new]; for(NSArray *row in @[@[@"Bookmarks",@"showBookmarks:"],@[@"History",@"showHistory:"],@[@"Downloads",@"showDownloads:"],@[@"Find in Page…",@"find:"],@[@"Mute / Unmute Tab",@"mute:"],@[@"Developer Tools",@"devtools:"]]) { NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:row[0] action:NSSelectorFromString(row[1]) keyEquivalent:@""]; item.target=self; [menu addItem:item]; } [self popUp:menu under:[toolbar viewWithTag:44]]; }
 - (void)mute:(id)sender { if(current->browser) current->browser->GetHost()->SetAudioMuted(!current->browser->GetHost()->IsAudioMuted()); }
 - (void)devtools:(id)sender { if(current->browser) { CefWindowInfo info; CefBrowserSettings settings; current->browser->GetHost()->ShowDevTools(info,nullptr,settings,CefPoint()); } }
 - (void)about:(id)sender { [self alert:@"Mallard 0.1" detail:@"A browser for school and everything else.\n\nLocal development build · Chromium 154"]; }
@@ -639,7 +727,7 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
     }
     if(menu.numberOfItems) [menu addItem:NSMenuItem.separatorItem];
     for(NSArray *row in @[@[@"Save a Password…",@"addPassword:"],@[@"Add a Card…",@"addCard:"],@[@"Import Chrome Passwords…",@"importPasswords:"]]) { NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:row[0] action:NSSelectorFromString(row[1]) keyEquivalent:@""]; item.target=self; [menu addItem:item]; }
-    [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(vaultButton.frame.origin.x,46) inView:toolbar];
+    [self popUp:menu under:vaultButton];
 }
 - (NSArray<NSString *> *)form:(NSString *)title fields:(NSArray<NSString *> *)names secure:(NSIndexSet *)secure {
     NSString *detail=[NSString stringWithFormat:@"Saved only in %@. Touch ID or your Mac password protects access.",profile.capitalizedString];
@@ -733,6 +821,7 @@ int main(int argc,char **argv) {
         if(argc>1 && strcmp(argv[1],"--test-telemetry")==0) return MallardTelemetryTests()?0:1;
         if(argc>1 && strcmp(argv[1],"--test-bookmarks")==0) return MallardBookmarkTests()?0:1;
         if(argc>1 && strcmp(argv[1],"--test-favicons")==0) return MallardFaviconTests()?0:1;
+        if(argc>1 && strcmp(argv[1],"--test-window")==0) return MallardWindowTests()?0:1;
         if(argc==5 && strcmp(argv[1],"--import-chrome-bookmarks")==0) return MallardImportChromeSession([NSString stringWithUTF8String:argv[2]],[NSString stringWithUTF8String:argv[3]],[NSString stringWithUTF8String:argv[4]]);
         if(argc>1 && strcmp(argv[1],"--test-vault-storage")==0) return MallardVaultStorageTest()?0:1;
         if(argc>1 && strcmp(argv[1],"--test-vault-auth")==0) return MallardVaultAuthenticationTest()?0:1;

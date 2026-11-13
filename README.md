@@ -11,7 +11,8 @@ still a work in progress, but it browses actual websites now!
 ## what's in it
 
 - Personal and School profiles with separate cookies, tabs, bookmarks, and autofill
-- sidebar tabs, bookmark folders, and website favicons
+- sidebar tabs, bookmark folders, and website favicons. the sidebar hides with ctrl-cmd-S
+- the address bar sits in the title bar, so no wasted space up top
 - Chrome bookmark import, including folders
 - Brave Search, history, downloads, and session restore
 - ad and tracker blocking, with a shield button to pause it for a tab

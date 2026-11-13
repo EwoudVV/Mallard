@@ -7,10 +7,11 @@ build/Mallard.app/Contents/MacOS/Mallard --test-core
 build/Mallard.app/Contents/MacOS/Mallard --test-bookmarks
 build/Mallard.app/Contents/MacOS/Mallard --test-favicons
 build/Mallard.app/Contents/MacOS/Mallard --test-telemetry
+build/Mallard.app/Contents/MacOS/Mallard --test-window
 cargo test --locked --manifest-path Blocker/Cargo.toml
 ```
 
-these cover URL handling, the password CSV parser, bookmark imports, favicon handling, resource counters, and blocking rules.
+these cover URL handling, the password CSV parser, bookmark imports, favicon handling, resource counters, title bar clicks, and blocking rules.
 
 ```sh
 python3 scripts/check_signing.py
@@ -35,6 +36,8 @@ open these in Mallard:
 the Developer menu's autofill actions only work on this local test server and use fake values.
 
 click the URL bar, type without submitting, click the page, and repeat. each return to the bar should select the full address. a second click while editing should place the cursor normally. clicking a bookmark should add a tab and keep the previous one open.
+
+hide and show the sidebar with the button next to the window buttons and with ctrl-cmd-S, including while a web page has focus. when hidden, the back button should follow the sidebar button at the same spacing as the other toolbar buttons, and the setting should survive a restart.
 
 ## Keychain checks
 

@@ -80,7 +80,7 @@ NSFont *MallardMono(CGFloat size) {
     CGRect ink=CTLineGetBoundsWithOptions(line,kCTLineBoundsUseGlyphPathBounds);
     CGContextRef context=NSGraphicsContext.currentContext.CGContext;CGContextSaveGState(context);
     CGContextSetTextMatrix(context,CGAffineTransformIdentity);
-    CGContextSetTextPosition(context,2,round((self.bounds.size.height-ink.size.height)/2-ink.origin.y));
+    CGContextSetTextPosition(context,0,round((self.bounds.size.height-ink.size.height)/2-ink.origin.y));
     CTLineDraw(line,context);CGContextRestoreGState(context);CFRelease(line);
 }
 @end
@@ -116,9 +116,14 @@ NSFont *MallardMono(CGFloat size) {
 - (BOOL)isFlipped { return YES; }
 - (void)focusChanged:(NSNotification *)notification { self.needsDisplay=YES; }
 - (BOOL)hasFocus { return self.window.firstResponder==_field || (_field.currentEditor && self.window.firstResponder==_field.currentEditor); }
+- (void)tintCursor {
+    NSText *editor=_field.currentEditor;
+    if([editor isKindOfClass:NSTextView.class] && ![((NSTextView *)editor).insertionPointColor isEqual:_field.textColor])((NSTextView *)editor).insertionPointColor=_field.textColor;
+}
 - (void)windowUpdated:(NSNotification *)notification {
     if(notification.object!=self.window)return;
-    BOOL focused=[self hasFocus];if(!focused)clickedWhileFocused=NO;if(focused!=lastFocused){lastFocused=focused;self.needsDisplay=YES;}
+    BOOL focused=[self hasFocus];if(!focused)clickedWhileFocused=NO;else [self tintCursor];
+    if(focused!=lastFocused){lastFocused=focused;self.needsDisplay=YES;}
 }
 - (void)windowResigned:(NSNotification *)notification { if(notification.object==self.window)clickedWhileFocused=NO; }
 - (void)setMinimal:(BOOL)value { _minimal=value; [self setNeedsLayout:YES]; self.needsDisplay=YES; }
@@ -138,7 +143,7 @@ NSFont *MallardMono(CGFloat size) {
         return event;
     }];
 }
-- (void)focusAndSelectAll { [self.window makeFirstResponder:_field];[_field selectText:nil];clickedWhileFocused=YES; }
+- (void)focusAndSelectAll { [self.window makeFirstResponder:_field];[_field selectText:nil];[self tintCursor];clickedWhileFocused=YES; }
 - (void)setTrailingInset:(CGFloat)value { _trailingInset=value; [self setNeedsLayout:YES]; }
 - (void)setPrompt:(NSString *)value {
     _prompt=[value copy];
@@ -148,13 +153,16 @@ NSFont *MallardMono(CGFloat size) {
 - (void)layout {
     [super layout];
     CGFloat height=ceil(_field.cell.cellSize.height);
-    CGFloat lineArea=self.minimal?self.bounds.size.height-14:self.bounds.size.height;
-    CGFloat inset=self.minimal?(self.prompt.length?30:0):9;
+    // Minimal inputs keep the underline 5 points under the text line.
+    CGFloat lineArea=self.minimal?self.bounds.size.height-5:self.bounds.size.height;
+    // Editable text draws 2 points inside the field. Start it one space after the prompt, like a terminal.
+    CGFloat promptWidth=self.prompt.length?ceil([[self.prompt stringByAppendingString:@" "] sizeWithAttributes:@{NSFontAttributeName:_field.font}].width):0;
+    CGFloat inset=self.minimal?promptWidth-2:9;
     NSRect text=NSMakeRect(inset,round((lineArea-height)/2),MAX(0,self.bounds.size.width-inset-(self.minimal?0:9)-self.trailingInset),height);
     _field.frame=text;
     if(promptLabel) {
         CGFloat letterCenter=NSMinY(text)+_field.firstBaselineOffsetFromTop-_field.font.capHeight/2;
-        promptLabel.frame=NSMakeRect(0,letterCenter-lineArea/2,24,lineArea);
+        promptLabel.frame=NSMakeRect(0,letterCenter-lineArea/2,MAX(1,promptWidth),lineArea);
     }
 }
 - (void)drawRect:(NSRect)dirty {
@@ -167,7 +175,7 @@ NSFont *MallardMono(CGFloat size) {
         [Shade(.09) setFill]; [shape fill]; [(focused?Shade(.45):Shade(.15)) setStroke]; shape.lineWidth=1; [shape stroke];
     }
 }
-- (void)mouseDown:(NSEvent *)event { if(self.selectsAllOnFirstClick)[self focusAndSelectAll];else[self.window makeFirstResponder:_field]; }
+- (void)mouseDown:(NSEvent *)event { if(self.selectsAllOnFirstClick)[self focusAndSelectAll];else{[self.window makeFirstResponder:_field];[self tintCursor];} }
 - (void)dealloc { if(clickMonitor)[NSEvent removeMonitor:clickMonitor];[NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end
 
@@ -209,37 +217,42 @@ static NSTextField *PanelLabel(NSString *text,CGFloat size,CGFloat shade) {
 }
 
 NSInteger MallardRunDialog(NSWindow *parent,NSString *title,NSString *detail,NSArray<NSString *> *names,NSIndexSet *secure,NSArray<NSString *> *initial,NSArray<NSString *> *buttons,NSArray<NSString *> **values) {
-    CGFloat width=MIN(480,parent.contentView.bounds.size.width-48),inside=width-40;
+    // One margin on every side. Text frames sit 2 points left so letters start on the same edge as the boxes and buttons.
+    const CGFloat margin=20,inset=2,labelGap=3,fieldHeight=32,rowGap=12;
+    CGFloat width=MIN(480,parent.contentView.bounds.size.width-48),inside=width-2*margin;
     NSTextField *heading=PanelLabel(title,14,.94),*explanation=PanelLabel(detail,11,.65);
-    CGFloat titleHeight=ceil([heading.cell cellSizeForBounds:NSMakeRect(0,0,inside,CGFLOAT_MAX)].height);
-    CGFloat detailHeight=detail.length?ceil([explanation.cell cellSizeForBounds:NSMakeRect(0,0,inside,CGFLOAT_MAX)].height):0;
-    CGFloat header=20+titleHeight+(detailHeight?12+detailHeight:0)+20;
-    CGFloat rows=0; for(NSString *name in names) rows+=name.length?62:38;
-    CGFloat visible=MIN(rows,MAX(100,parent.contentView.bounds.size.height-header-98));
-    CGFloat height=header+visible+66;
+    CGFloat titleHeight=ceil([heading.cell cellSizeForBounds:NSMakeRect(0,0,inside+2*inset,CGFLOAT_MAX)].height);
+    CGFloat detailHeight=detail.length?ceil([explanation.cell cellSizeForBounds:NSMakeRect(0,0,inside+2*inset,CGFLOAT_MAX)].height):0;
+    // The heading's line box has room above its capitals. Pull it up so the capitals start at the margin.
+    CGFloat headingY=margin-round(heading.font.ascender-heading.font.capHeight);
+    CGFloat y=headingY+titleHeight,detailY=0; if(detailHeight){y+=8;detailY=y;y+=detailHeight;}
+    CGFloat rows=0; for(NSUInteger i=0;i<names.count;i++) rows+=(i?rowGap:0)+(names[i].length?18+labelGap:0)+fieldHeight;
+    CGFloat fieldsTop=y+(names.count?margin:0);
+    CGFloat visible=names.count?MIN(rows,MAX(100,parent.contentView.bounds.size.height-fieldsTop-2*margin-30-48)):0;
+    CGFloat buttonsY=fieldsTop+visible+margin,height=buttonsY+30+margin;
     NSPanel *panel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,width,height) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
     panel.title=title; panel.titleVisibility=NSWindowTitleHidden; panel.titlebarAppearsTransparent=YES;
     panel.autorecalculatesKeyViewLoop=YES;
     panel.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]; panel.backgroundColor=Shade(.055);
     MallardPanelContent *content=[[MallardPanelContent alloc] initWithFrame:NSMakeRect(0,0,width,height)]; panel.contentView=content;
-    heading.frame=NSMakeRect(20,20,inside,titleHeight); [content addSubview:heading];
-    if(detailHeight) { explanation.frame=NSMakeRect(20,20+titleHeight+12,inside,detailHeight); [content addSubview:explanation]; }
-    NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(20,header,inside,visible)]; scroll.hasVerticalScroller=rows>visible; scroll.autohidesScrollers=YES; scroll.drawsBackground=NO;
+    heading.frame=NSMakeRect(margin-inset,headingY,inside+2*inset,titleHeight); [content addSubview:heading];
+    if(detailHeight) { explanation.frame=NSMakeRect(margin-inset,detailY,inside+2*inset,detailHeight); [content addSubview:explanation]; }
+    NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(margin,fieldsTop,inside,visible)]; scroll.hasVerticalScroller=rows>visible; scroll.autohidesScrollers=YES; scroll.drawsBackground=NO;
     MallardPanelContent *document=[[MallardPanelContent alloc] initWithFrame:NSMakeRect(0,0,scroll.contentSize.width,rows)]; scroll.documentView=document; [content addSubview:scroll];
-    MallardDialog *dialog=[[MallardDialog alloc] initWithWindow:panel]; NSMutableArray *fields=[NSMutableArray array]; CGFloat y=0;
+    MallardDialog *dialog=[[MallardDialog alloc] initWithWindow:panel]; NSMutableArray *fields=[NSMutableArray array]; y=0;
     dialog.cancelIndex=0;for(NSUInteger i=0;i<buttons.count;i++)if([@[@"Cancel",@"Stay on Page"] containsObject:buttons[i]])dialog.cancelIndex=i;
     for(NSUInteger i=0;i<names.count;i++) {
         CGFloat fieldY=y;
-        if(names[i].length) { NSTextField *label=PanelLabel(names[i],11,.70); label.frame=NSMakeRect(0,y,inside-4,18); [document addSubview:label]; fieldY+=21; }
-        MallardInput *input=[[MallardInput alloc] initWithFontSize:12 secure:[secure containsIndex:i]]; input.frame=NSMakeRect(0,fieldY,document.bounds.size.width-3,32);
+        if(names[i].length) { NSTextField *label=PanelLabel(names[i],11,.70); label.frame=NSMakeRect(-inset,y,document.bounds.size.width+2*inset,18); [document addSubview:label]; fieldY+=18+labelGap; }
+        MallardInput *input=[[MallardInput alloc] initWithFontSize:12 secure:[secure containsIndex:i]]; input.frame=NSMakeRect(0,fieldY,document.bounds.size.width,fieldHeight);
         NSTextField *field=input.field; field.stringValue=i<initial.count?initial[i]:@""; [field setAccessibilityLabel:names[i].length?names[i]:title]; field.target=dialog; field.action=@selector(finish:); field.tag=0;
-        [document addSubview:input]; [fields addObject:field]; y+=names[i].length?62:38;
+        [document addSubview:input]; [fields addObject:field]; y=fieldY+fieldHeight+rowGap;
     }
     dialog.fields=fields;
-    CGFloat x=width-20;
+    CGFloat x=width-margin;
     for(NSUInteger i=0;i<buttons.count;i++) {
         CGFloat buttonWidth=MAX(86,ceil([buttons[i] sizeWithAttributes:@{NSFontAttributeName:MallardMono(12)}].width)+24); x-=buttonWidth;
-        MallardButton *button=[[MallardButton alloc] initWithFrame:NSMakeRect(x,height-48,buttonWidth,30)]; button.title=buttons[i]; button.chosen=i==0; button.tag=i; button.target=dialog; button.action=@selector(finish:);
+        MallardButton *button=[[MallardButton alloc] initWithFrame:NSMakeRect(x,buttonsY,buttonWidth,30)]; button.title=buttons[i]; button.chosen=i==0; button.tag=i; button.target=dialog; button.action=@selector(finish:);
         button.keyEquivalent=i==0?@"\r":i==dialog.cancelIndex?@"\e":@""; [content addSubview:button]; x-=8;
     }
     panel.initialFirstResponder=fields.firstObject;
