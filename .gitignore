@@ -1,6 +1,7 @@
 .DS_Store
 .build/
 .deps/
+.local/
 target/
 DerivedData/
 build/
@@ -22,6 +23,10 @@ xcuserdata/
 *.sqlite3-*
 *.keychain
 *.keychain-db
+*.p12
+*.pfx
+*.pem
+*.key
 .env
 .env.*
 BrowserData/

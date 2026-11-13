@@ -9,10 +9,25 @@ static NSMutableDictionary *Node(NSDictionary *input,NSUInteger depth) {
     NSString *title=[input[@"title"] isKindOfClass:NSString.class]?input[@"title"]:[input[@"name"] isKindOfClass:NSString.class]?input[@"name"]:folder?@"Folder":url;
     NSMutableDictionary *node=[@{@"id":[input[@"id"] isKindOfClass:NSString.class]?input[@"id"]:NSUUID.UUID.UUIDString,@"title":title,@"type":folder?@"folder":@"url"} mutableCopy];
     if(folder){NSMutableArray *children=[NSMutableArray array];for(id child in input[@"children"]){id value=Node(child,depth+1);if(value)[children addObject:value];}node[@"children"]=children;}else node[@"url"]=url;
-    for(NSString *key in @[@"chromeSource",@"chromeID"])if([input[key] isKindOfClass:NSString.class])node[key]=input[key];
+    for(NSString *key in @[@"chromeSource",@"chromeID",@"chromeRoot"])if([input[key] isKindOfClass:NSString.class])node[key]=input[key];
     return node;
 }
 NSMutableArray *MallardBookmarkTree(NSArray *items) { NSMutableArray *result=[NSMutableArray array];for(id item in items){id node=Node(item,0);if(node)[result addObject:node];}return result; }
+NSArray *MallardBookmarkDisplayRoots(NSArray *items) {
+    NSMutableArray *visible=[NSMutableArray array];
+    for(NSDictionary *item in items) {
+        NSString *source=item[@"chromeSource"];
+        if(!source || !item[@"children"] || item[@"chromeID"]){[visible addObject:item];continue;}
+        for(NSDictionary *child in item[@"children"]) {
+            NSString *root=child[@"chromeRoot"],*identifier=child[@"chromeID"];
+            BOOL bar=[root isEqual:@"bookmark_bar"] || [identifier isEqual:[source stringByAppendingString:@":1"]];
+            BOOL other=[root isEqual:@"other"] || [root isEqual:@"synced"] || [identifier isEqual:[source stringByAppendingString:@":2"]] || [identifier isEqual:[source stringByAppendingString:@":3"]];
+            if(bar && child[@"children"])[visible addObjectsFromArray:child[@"children"]];
+            else if(!(other && [child[@"children"] count]==0))[visible addObject:child];
+        }
+    }
+    return visible;
+}
 NSUInteger MallardBookmarkCount(NSArray *items) { NSUInteger count=0;for(NSDictionary *node in items)count+=node[@"children"]?MallardBookmarkCount(node[@"children"]):1;return count; }
 static void ChromeIDs(NSArray *items,NSMutableSet *ids) { for(NSDictionary *node in items){if(node[@"chromeID"])[ids addObject:node[@"chromeID"]];if(node[@"children"])ChromeIDs(node[@"children"],ids);} }
 static NSMutableDictionary *ImportNode(NSDictionary *source,NSString *prefix,NSMutableSet *ids,NSUInteger *imported,NSUInteger *skipped,NSUInteger depth) {
@@ -35,7 +50,7 @@ NSDictionary *MallardImportChrome(NSString *path,NSString *sourceName,NSMutableA
     NSMutableSet *ids=[NSMutableSet set];ChromeIDs(destination,ids);NSUInteger imported=0,skipped=0;
     NSString *prefix=path.stringByDeletingLastPathComponent.lastPathComponent;
     NSMutableDictionary *group=nil;for(NSMutableDictionary *node in destination)if([node[@"chromeSource"] isEqual:prefix] && node[@"children"]){group=node;break;}
-    NSMutableArray *folders=[NSMutableArray array];for(NSString *root in @[@"bookmark_bar",@"other",@"synced"]){id node=ImportNode(json[@"roots"][root],prefix,ids,&imported,&skipped,0);if(node)[folders addObject:node];}
+    NSMutableArray *folders=[NSMutableArray array];for(NSString *root in @[@"bookmark_bar",@"other",@"synced"]){id node=ImportNode(json[@"roots"][root],prefix,ids,&imported,&skipped,0);if(node){node[@"chromeRoot"]=root;[folders addObject:node];}}
     if(folders.count){if(!group){group=[@{@"id":NSUUID.UUID.UUIDString,@"title":[@"Chrome - " stringByAppendingString:sourceName],@"type":@"folder",@"chromeSource":prefix,@"children":[NSMutableArray array]} mutableCopy];[destination addObject:group];}MergeFolders(group[@"children"],folders);}
     return @{@"imported":@(imported),@"skipped":@(skipped)};
 }
@@ -62,5 +77,19 @@ BOOL MallardBookmarkTests(void) {
     [[NSJSONSerialization dataWithJSONObject:fixture options:0 error:nil] writeToFile:path atomically:YES];
     NSDictionary *first=MallardImportChrome(path,@"Test",items,nil),*second=MallardImportChrome(path,@"Test",items,nil);
     ok=ok && [first[@"imported"] intValue]==1 && [second[@"imported"] intValue]==0 && MallardBookmarkCount(items)==2 && [items[1][@"children"][0][@"children"][0][@"title"] isEqual:@"School"];
+    NSArray *visible=MallardBookmarkDisplayRoots(items);
+    ok=ok && visible.count==2 && visible[1]==items[1][@"children"][0][@"children"][0] && MallardBookmarkCount(visible)==2;
+    NSArray *restored=MallardBookmarkTree(items);
+    ok=ok && [MallardBookmarkDisplayRoots(restored)[1][@"title"] isEqual:@"School"];
+    NSDictionary *link=@{@"title":@"Example",@"url":@"https://example.org"};
+    NSDictionary *nested=@{@"title":@"Folder",@"children":@[link]};
+    NSDictionary *bar=@{@"title":@"Localized toolbar name",@"chromeID":@"Default:1",@"children":@[link,nested]};
+    NSDictionary *other=@{@"title":@"Other Bookmarks",@"chromeID":@"Default:2",@"children":@[link]};
+    NSDictionary *mobile=@{@"title":@"Mobile Bookmarks",@"chromeID":@"Default:3",@"children":@[]};
+    NSDictionary *group=@{@"title":@"Chrome - Test",@"chromeSource":@"Default",@"children":@[bar,other,mobile]};
+    NSDictionary *ownFolder=@{@"title":@"Bookmarks Bar",@"children":@[link]};
+    NSArray *legacy=@[group,ownFolder];visible=MallardBookmarkDisplayRoots(legacy);
+    ok=ok && visible.count==4 && visible[0]==link && visible[1]==nested && visible[2]==other && visible[3]==ownFolder;
+    ok=ok && MallardBookmarkCount(visible)==MallardBookmarkCount(legacy) && [group[@"children"] count]==3;
     [[NSFileManager defaultManager] removeItemAtPath:directory error:nil];fprintf(stderr,"Bookmark checks: %s\n",ok?"passed":"failed");return ok;
 }

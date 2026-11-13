@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Page background check</title>
+<style>
+  :root { color-scheme:light }
+  body { margin:0; color:#202124; font:16px system-ui,sans-serif }
+  aside { position:fixed; inset:0 auto 0 0; width:180px; padding:24px; background:#f6f8fc }
+  main { margin-left:228px; padding:32px }
+  section { padding:24px; background:white; border:1px solid #dadce0; border-radius:12px }
+  p { line-height:1.6 }
+  a { color:#1967d2 }
+</style>
+<aside>Sidebar with its own background</aside>
+<main>
+  <section>
+    <h1>Page background check</h1>
+    <p>The area around and below this card should be white. The page leaves that part of its background transparent.</p>
+    <p><a href="/visual.html">Open the dark page</a></p>
+  </section>
+  <p>Text on the transparent page canvas should stay readable.</p>
+</main>
+</html>

@@ -332,11 +332,11 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
     tabsDocument=[MallardView new];tabsDocument.autoresizingMask=NSViewWidthSizable;tabsScroll.documentView=tabsDocument;[sidebar addSubview:tabsScroll];
     newTabButton=Button(@"+ new tab",self,@selector(newTab:));newTabButton.leftAligned=YES;[tabsDocument addSubview:newTabButton];
     bookmarkView=[MallardBookmarkView new];bookmarkView.favicons=favicons;__weak MallardController *weakSelf=self;
-    bookmarkView.openURL=^(NSString *url){[weakSelf navigate:url];};bookmarkView.changed=^{[weakSelf saveSession];};bookmarkView.importRequested=^{[weakSelf importBookmarks:nil];};[sidebar addSubview:bookmarkView];
+    bookmarkView.openURL=^(NSString *url){MallardController *owner=weakSelf;if(owner)[owner newTabURL:url profile:owner->profile];};bookmarkView.changed=^{[weakSelf saveSession];};bookmarkView.importRequested=^{[weakSelf importBookmarks:nil];};[sidebar addSubview:bookmarkView];
     toolbar=[MallardView new]; FillBackground(toolbar,Color(.065)); [root addSubview:toolbar];
     backButton=Icon(@"chevron.left",@"Back",self,@selector(goBack:));forwardButton=Icon(@"chevron.right",@"Forward",self,@selector(goForward:));reloadButton=Icon(@"arrow.clockwise",@"Reload",self,@selector(stopOrReload:));
     NSInteger navigationIndex=0;for(NSButton *b in @[backButton,forwardButton,reloadButton]) { b.frame=NSMakeRect(8+navigationIndex++*29,12,28,28); [toolbar addSubview:b]; }
-    addressInput=[[MallardInput alloc] initWithFontSize:12 secure:NO]; addressInput.trailingInset=24;address=addressInput.field;
+    addressInput=[[MallardInput alloc] initWithFontSize:12 secure:NO]; addressInput.trailingInset=24;addressInput.selectsAllOnFirstClick=YES;address=addressInput.field;
     address.placeholderAttributedString=[[NSAttributedString alloc] initWithString:@"Search or enter address" attributes:@{NSFontAttributeName:Mono(12),NSForegroundColorAttributeName:Color(.55)}]; address.target=self; address.action=@selector(addressEntered:); address.delegate=self; [address setAccessibilityLabel:@"Address"]; [toolbar addSubview:addressInput];
     vaultButton=Icon(@"key.horizontal",@"Passwords and cards",self,@selector(showVault:)); [toolbar addSubview:vaultButton];
     shieldButton=Icon(@"shield",@"Ad blocking",self,@selector(showProtection:)); [toolbar addSubview:shieldButton];
@@ -514,7 +514,7 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
     if(current->url.length && !current->browser && !current->creating) {
         current->creating=true; current->host.frame=webArea.bounds;
         CefWindowInfo info; info.SetAsChild((__bridge CefWindowHandle)current->host,CefRect(0,0,webArea.bounds.size.width,webArea.bounds.size.height)); info.runtime_style=CEF_RUNTIME_STYLE_ALLOY;
-        CefBrowserSettings settings; settings.background_color=CefColorSetARGB(255,5,5,5);
+        CefBrowserSettings settings; settings.background_color=CefColorSetARGB(255,255,255,255);
         if(!CefBrowserHost::CreateBrowser(info,new BrowserClient(current),CefText(current->url),settings,nullptr,[profile isEqual:@"personal"]?personalContext:schoolContext)) { current->creating=false; [self alert:@"Couldn't create this tab" detail:@"Chromium did not accept the browser view request."]; }
     }
     [self refresh]; [self saveSession];
@@ -539,7 +539,7 @@ static void FillBackground(NSView *view,NSColor *color) { view.wantsLayer=YES; v
     [self activateCurrent];
 }
 - (void)addressEntered:(NSTextField *)sender { [self navigate:MallardURL(sender.stringValue)]; homeSearch.stringValue=@""; }
-- (void)focusAddress:(id)sender { [window makeFirstResponder:address]; [address selectText:nil]; }
+- (void)focusAddress:(id)sender { [addressInput focusAndSelectAll]; }
 - (void)goBack:(id)sender { if(current->browser) current->browser->GoBack(); }
 - (void)goForward:(id)sender { if(current->browser) current->browser->GoForward(); }
 - (void)reload:(id)sender { if(current->browser) current->browser->Reload(); }

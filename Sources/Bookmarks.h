@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 NSMutableArray *MallardBookmarkTree(NSArray *items);
+NSArray *MallardBookmarkDisplayRoots(NSArray *items);
 NSUInteger MallardBookmarkCount(NSArray *items);
 NSDictionary *MallardImportChrome(NSString *path,NSString *sourceName,NSMutableArray *destination,NSError **error);
 BOOL MallardBookmarkTests(void);

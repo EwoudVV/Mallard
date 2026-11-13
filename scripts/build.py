@@ -7,8 +7,10 @@ import re
 import shutil
 import subprocess
 import sys
+from development_signing import load_identity
 
 ROOT=Path(__file__).resolve().parents[1]
+signing=load_identity()
 running=subprocess.run(['pgrep','-f','^'+re.escape(str(ROOT/'build/Mallard.app/Contents/MacOS/Mallard'))+'( |$)'],capture_output=True,text=True)
 if running.returncode==0:
     raise SystemExit('Quit Mallard before rebuilding. Its open tabs will be restored when you launch it again.')
@@ -21,9 +23,10 @@ run('cargo','build','--release','--locked','--manifest-path','Blocker/Cargo.toml
 run('cmake','-S','.','-B','build/native','-G','Unix Makefiles','-DCMAKE_BUILD_TYPE=Release')
 run('cmake','--build','build/native','--parallel','8')
 app=ROOT/'build/Mallard.app'
-native=ROOT/'build/native/Mallard.app'
-app.mkdir(parents=True,exist_ok=True)
-shutil.copytree(native,app,dirs_exist_ok=True)
+contents=app/'Contents'
+(contents/'MacOS').mkdir(parents=True,exist_ok=True)
+shutil.copy2(ROOT/'build/native/Mallard',contents/'MacOS/Mallard')
+shutil.copy2(ROOT/'Resources/Info.plist',contents/'Info.plist')
 frameworks=app/'Contents/Frameworks'
 frameworks.mkdir(exist_ok=True)
 framework=frameworks/'Chromium Embedded Framework.framework'
@@ -53,6 +56,16 @@ shutil.copy2(ROOT/'Resources/autofill.js',resources/'autofill.js')
 for name in ['blocking','fonts','ThirdParty']:
     source=ROOT/'Resources'/name
     if source.exists(): shutil.copytree(source,resources/name,dirs_exist_ok=True)
-run('codesign','--force','--deep','--sign','-',str(app))
+run('codesign','--force','--deep','--sign',signing['identity'],'--keychain',signing['keychain'],'--timestamp=none',str(app))
 run('codesign','--verify','--deep','--strict',str(app))
+lsregister='/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
+old_bundle=ROOT/'build/native/Mallard.app'
+if old_bundle.exists():
+    run(lsregister,'-u',str(old_bundle))
+    retired=ROOT/'build/retired-native-bundle'
+    if retired.exists():
+        raise SystemExit('Move build/retired-native-bundle aside before retiring another old bundle.')
+    old_bundle.rename(retired)
+os.utime(app,None)
+run(lsregister,'-f',str(app))
 print('\nBuilt '+str(app))

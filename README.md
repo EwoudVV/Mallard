@@ -28,11 +28,14 @@ currently targets Apple silicon and macOS 26. you'll need Xcode Command Line Too
 ```sh
 git clone https://github.com/EwoudVV/Mallard.git
 cd Mallard
+python3 scripts/development_signing.py
 python3 scripts/build.py
 open build/Mallard.app
 ```
 
 quit Mallard before rebuilding. the script downloads the pinned CEF build, checks its checksum, and signs the app locally. it doesn't install anything in Applications or change your default browser.
+
+signing setup is only needed once. the private key stays in your Mac's Keychain, and later builds reuse it so app permissions survive rebuilds. local signing settings stay in the ignored `.local` folder. when switching from an older build, macOS may ask once more about Chromium Safe Storage; choose Always Allow for Mallard to remember it.
 
 ## still working on
 

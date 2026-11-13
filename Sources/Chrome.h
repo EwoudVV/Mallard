@@ -12,9 +12,11 @@ NSFont *MallardMono(CGFloat size);
 @interface MallardInput : NSView
 @property(readonly) NSTextField *field;
 @property(nonatomic) BOOL minimal;
+@property(nonatomic) BOOL selectsAllOnFirstClick;
 @property(nonatomic) CGFloat trailingInset;
 @property(nonatomic,copy) NSString *prompt;
 - (instancetype)initWithFontSize:(CGFloat)size secure:(BOOL)secure;
+- (void)focusAndSelectAll;
 @end
 
 @interface MallardTabRow : NSView

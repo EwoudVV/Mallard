@@ -85,13 +85,22 @@ NSFont *MallardMono(CGFloat size) {
 }
 @end
 
+@interface MallardTextField : NSTextField
+@property BOOL selectsAllOnFirstClick;
+@end
+@implementation MallardTextField
+- (BOOL)acceptsFirstMouse:(NSEvent *)event { return self.selectsAllOnFirstClick || [super acceptsFirstMouse:event]; }
+@end
+
 @implementation MallardInput {
     MallardPrompt *promptLabel;
     BOOL lastFocused;
+    BOOL clickedWhileFocused;
+    id clickMonitor;
 }
 - (instancetype)initWithFontSize:(CGFloat)size secure:(BOOL)secure {
     if((self=[super initWithFrame:NSZeroRect])) {
-        _field=secure?[NSSecureTextField new]:[NSTextField new];
+        _field=secure?[NSSecureTextField new]:[MallardTextField new];
         _field.font=MallardMono(size); _field.bordered=NO; _field.drawsBackground=NO;
         _field.textColor=Shade(.94); _field.focusRingType=NSFocusRingTypeNone;
         _field.cell.usesSingleLineMode=YES; _field.cell.scrollable=YES;
@@ -100,6 +109,7 @@ NSFont *MallardMono(CGFloat size) {
         for(NSNotificationName name in @[NSControlTextDidBeginEditingNotification,NSControlTextDidEndEditingNotification])
             [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(focusChanged:) name:name object:_field];
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowUpdated:) name:NSWindowDidUpdateNotification object:nil];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowResigned:) name:NSWindowDidResignKeyNotification object:nil];
     }
     return self;
 }
@@ -108,9 +118,27 @@ NSFont *MallardMono(CGFloat size) {
 - (BOOL)hasFocus { return self.window.firstResponder==_field || (_field.currentEditor && self.window.firstResponder==_field.currentEditor); }
 - (void)windowUpdated:(NSNotification *)notification {
     if(notification.object!=self.window)return;
-    BOOL focused=[self hasFocus];if(focused!=lastFocused){lastFocused=focused;self.needsDisplay=YES;}
+    BOOL focused=[self hasFocus];if(!focused)clickedWhileFocused=NO;if(focused!=lastFocused){lastFocused=focused;self.needsDisplay=YES;}
 }
+- (void)windowResigned:(NSNotification *)notification { if(notification.object==self.window)clickedWhileFocused=NO; }
 - (void)setMinimal:(BOOL)value { _minimal=value; [self setNeedsLayout:YES]; self.needsDisplay=YES; }
+- (void)setSelectsAllOnFirstClick:(BOOL)value {
+    _selectsAllOnFirstClick=value;
+    if([_field isKindOfClass:MallardTextField.class])((MallardTextField *)_field).selectsAllOnFirstClick=value;
+    if(!value && clickMonitor){[NSEvent removeMonitor:clickMonitor];clickMonitor=nil;}
+    if(!value || clickMonitor)return;
+    __weak MallardInput *weakSelf=self;
+    // The field editor receives later clicks directly, bypassing NSTextField.mouseDown.
+    clickMonitor=[NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown handler:^NSEvent *(NSEvent *event) {
+        MallardInput *owner=weakSelf;if(!owner)return event;
+        BOOL inside=event.window==owner.window && ![owner isHiddenOrHasHiddenAncestor] && NSPointInRect([owner convertPoint:event.locationInWindow fromView:nil],owner.bounds);
+        if(!inside){owner->clickedWhileFocused=NO;return event;}
+        BOOL selectAll=!owner->clickedWhileFocused || ![owner hasFocus];owner->clickedWhileFocused=YES;
+        if(selectAll && event.clickCount==1 && !(event.modifierFlags&(NSEventModifierFlagShift|NSEventModifierFlagCommand))){[owner focusAndSelectAll];return nil;}
+        return event;
+    }];
+}
+- (void)focusAndSelectAll { [self.window makeFirstResponder:_field];[_field selectText:nil];clickedWhileFocused=YES; }
 - (void)setTrailingInset:(CGFloat)value { _trailingInset=value; [self setNeedsLayout:YES]; }
 - (void)setPrompt:(NSString *)value {
     _prompt=[value copy];
@@ -139,8 +167,8 @@ NSFont *MallardMono(CGFloat size) {
         [Shade(.09) setFill]; [shape fill]; [(focused?Shade(.45):Shade(.15)) setStroke]; shape.lineWidth=1; [shape stroke];
     }
 }
-- (void)mouseDown:(NSEvent *)event { [self.window makeFirstResponder:_field]; }
-- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
+- (void)mouseDown:(NSEvent *)event { if(self.selectsAllOnFirstClick)[self focusAndSelectAll];else[self.window makeFirstResponder:_field]; }
+- (void)dealloc { if(clickMonitor)[NSEvent removeMonitor:clickMonitor];[NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end
 
 @implementation MallardTabRow
