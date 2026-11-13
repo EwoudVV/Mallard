@@ -11,6 +11,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / '.local/signing.json'
+PREVIOUS = ROOT / '.local/signing-previous.json'
+APPLE_IDENTITY = re.compile(r'([0-9A-F]{40}) "(Apple Development: [^"]+)"')
 
 
 def run(*args, **kwargs):
@@ -31,6 +33,43 @@ def load_identity():
     if identity not in identities:
         raise SystemExit('The saved signing identity is missing from Keychain. Restore it before rebuilding; creating a new one would reset app permissions.')
     return config
+
+
+def save(config):
+    CONFIG.parent.mkdir(mode=0o700, exist_ok=True)
+    CONFIG.write_text(json.dumps(config, indent=2) + '\n')
+    CONFIG.chmod(0o600)
+
+
+def use_apple_development(fingerprint=None):
+    """Sign with an Apple Development certificate from Xcode.
+
+    Its team ID gives every build the same Keychain identity, so rebuilds stop
+    asking about Chromium Safe Storage. A self-signed certificate can't do that.
+    """
+    os.umask(0o077)
+    keychain = run('security', 'default-keychain', '-d', 'user').strip().strip('"')
+    # -v leaves out expired and revoked certificates.
+    found = APPLE_IDENTITY.findall(run('security', 'find-identity', '-v', '-p', 'codesigning', keychain))
+    if fingerprint:
+        found = [entry for entry in found if entry[0] == fingerprint.upper()]
+    if not found:
+        raise SystemExit('No usable Apple Development certificate was found. In Xcode, open Settings > Accounts, sign in with your Apple ID, select your Personal Team, click Manage Certificates, then add an Apple Development certificate.')
+    if len(found) > 1:
+        listing = '\n'.join(f'  {identity}  {name}' for identity, name in found)
+        raise SystemExit(f'More than one Apple Development certificate was found. Run this again with the fingerprint to use:\n{listing}')
+    identity, name = found[0]
+    if CONFIG.exists():
+        current = json.loads(CONFIG.read_text())
+        if current.get('identity') == identity:
+            print(f'Already signing with {name}.')
+            return
+        PREVIOUS.write_text(CONFIG.read_text())
+        PREVIOUS.chmod(0o600)
+    save({'identity': identity, 'keychain': keychain, 'name': name})
+    load_identity()
+    print(f'Mallard now signs with {name}. The previous setting is saved in .local/signing-previous.json.')
+    print('The next build asks about Chromium Safe Storage one last time. Pick Always Allow.')
 
 
 def setup():
@@ -84,4 +123,8 @@ subjectKeyIdentifier = hash
 
 
 if __name__ == '__main__':
-    setup()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == '--apple':
+        use_apple_development(sys.argv[2] if len(sys.argv) > 2 else None)
+    else:
+        setup()
